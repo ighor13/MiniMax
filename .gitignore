@@ -1,0 +1,10 @@
+build/  
+.qtcreator/  
+*.user  
+CMakeCache.txt  
+CMakeFiles/  
+*.exe  
+*.dll  
+*.so  
+*.a  
+*.o 
