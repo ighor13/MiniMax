@@ -16,12 +16,9 @@ set(SOURCES
     gameutils.h
 )
 
-# Создаем цель (для Android и десктопа)
 qt_add_executable(MinimaxVisualizer ${SOURCES})
 
-# Настройки специфичные для Android
 if(ANDROID)
-    # Указываем путь к папке с манифестом (один раз для всех архитектур)
     set_target_properties(MinimaxVisualizer PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
     )
@@ -29,5 +26,37 @@ endif()
 
 target_link_libraries(MinimaxVisualizer PRIVATE Qt6::Widgets)
 
-# Обязательная финализация для Qt 6
 qt_finalize_executable(MinimaxVisualizer)
+
+if(WIN32)
+    get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+
+    if(WINDEPLOYQT_EXECUTABLE)
+        # Определяем папку для деплоя
+        set(DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy")
+
+        add_custom_command(TARGET MinimaxVisualizer POST_BUILD
+            # Создаем папку deploy, если ее нет
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_DIR}"
+
+            # Копируем exe в папку deploy
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "$<TARGET_FILE:MinimaxVisualizer>"
+                "${DEPLOY_DIR}/"
+
+            # Запускаем windeployqt для скопированного exe
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                --release
+                --no-translations
+                --no-compiler-runtime
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                "${DEPLOY_DIR}/MinimaxVisualizer.exe"
+
+            COMMENT "Deploying to ${DEPLOY_DIR}..."
+        )
+    endif()
+endif()
+# --------------------------------
