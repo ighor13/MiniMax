@@ -10,8 +10,8 @@ public:
     NodeItem(int id, QGraphicsItem *parent = nullptr);
 
     void setState(bool evaluated, int value);
-    void setPruned();
-    void resetItem(); // Новый метод для сброса
+    void setPruned(const QString& reason = "");
+    void resetItem();
 
     QRectF boundingRect() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
@@ -23,7 +23,7 @@ private:
     bool m_isEvaluated = false;
     bool m_isPruned = false;
     int m_value = 0;
-    // Увеличиваем размер узла до 50x50
+    QString m_pruneReason = "";
     QSizeF m_size = QSizeF(60, 60);
 };
 

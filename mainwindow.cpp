@@ -15,9 +15,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
-    // Отвязываем сцену от вида, чтобы избежать проблем с порядком удаления
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+
+    if (m_scene) {
+        m_scene->clear();
+    }
+
     if (m_view) {
-        m_view->setScene(nullptr);
+        delete m_view;
+        m_view = nullptr;
     }
 }
 
@@ -51,6 +59,9 @@ void MainWindow::setupUi() {
     m_chkMarkLeaves = new QCheckBox("Метить листья");
     m_chkMarkLeaves->setChecked(false);
 
+    m_chkShowReasons = new QCheckBox("Условия отсечения");
+    m_chkShowReasons->setChecked(true);
+
     QHBoxLayout *topLayout = new QHBoxLayout();
     topLayout->addWidget(m_btnStart);
     topLayout->addWidget(m_btnPause);
@@ -58,6 +69,7 @@ void MainWindow::setupUi() {
     topLayout->addWidget(m_btnStep);
     topLayout->addWidget(m_chkRootIsMax);
     topLayout->addWidget(m_chkMarkLeaves);
+    topLayout->addWidget(m_chkShowReasons);
     topLayout->addStretch();
 
     m_scene = new QGraphicsScene(this);
@@ -205,17 +217,18 @@ void MainWindow::drawConnections() {
     m_view->fitInView(m_scene->itemsBoundingRect(), Qt::KeepAspectRatio);
 }
 
-void MainWindow::markSubtreeAsPruned(int nodeId) {
+void MainWindow::markSubtreeAsPruned(int nodeId, const QString& reason) {
     GameNode &node = m_nodes[nodeId];
 
     if (node.type == NodeType::LEAF && !m_chkMarkLeaves->isChecked()) {
         return;
     }
 
-    m_animationSteps.append({nodeId, 0, false, 0, 0, true});
+    QString displayReason = m_chkShowReasons->isChecked() ? reason : "";
+    m_animationSteps.append({nodeId, 0, false, 0, 0, true, displayReason});
 
     for (int childId : node.children) {
-        markSubtreeAsPruned(childId);
+        markSubtreeAsPruned(childId, "");
     }
 }
 
@@ -316,8 +329,10 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
                      << "alpha" << alpha << "beta" << beta << "prune?" << (beta <= alpha);
 
             if (beta <= alpha) {
+                QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
+                qDebug() << "PRUNING REASON:" << reason;
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k]);
+                    markSubtreeAsPruned(node.children[k], reason);
                 }
                 break;
             }
@@ -338,8 +353,10 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
                      << "alpha" << alpha << "beta" << beta << "prune?" << (beta <= alpha);
 
             if (beta <= alpha) {
+                QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
+                qDebug() << "PRUNING REASON:" << reason;
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k]);
+                    markSubtreeAsPruned(node.children[k], reason);
                 }
                 break;
             }
@@ -371,7 +388,7 @@ void MainWindow::stepAnimation() {
     NodeItem *item = m_items[step.nodeId];
 
     if (step.isPruned) {
-        item->setPruned();
+        item->setPruned(step.pruneReason);
     } else if (step.isEvaluated) {
         item->setState(true, step.value);
         m_nodes[step.nodeId].value = step.value;

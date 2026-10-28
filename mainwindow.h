@@ -29,10 +29,7 @@ private:
     void buildTree();
     void layoutTree(GameNode& node, int level, int& currentX, int widthPerLeaf);
     void drawConnections();
-
-    // Рекурсивная функция для отсечения поддерева
-    void markSubtreeAsPruned(int nodeId);
-
+    void markSubtreeAsPruned(int nodeId, const QString& reason);
     int minimax(int nodeId, int depth, bool isMax, int alpha, int beta);
 
     QGraphicsScene *m_scene;
@@ -40,6 +37,7 @@ private:
     QTimer *m_animTimer;
     QCheckBox *m_chkRootIsMax;
     QCheckBox *m_chkMarkLeaves;
+    QCheckBox *m_chkShowReasons; // <--- НОВЫЙ ЧЕКБОКС
 
     QPushButton *m_btnStart;
     QPushButton *m_btnPause;

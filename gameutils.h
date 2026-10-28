@@ -3,6 +3,7 @@
 
 #include <QVector>
 #include <QPointF>
+#include <QString>
 
 enum class NodeType { MAX, MIN, LEAF };
 
@@ -15,12 +16,10 @@ struct GameNode {
     QVector<int> children;
     int parent = -1;
 
-    // Адресация
     int level = 0;
     int indexInLevel = 0;
 };
 
-// Значения листьев P1...P36
 static const QVector<int> LEAF_VALUES = {
     3, 2, 1, 0, 3, 4, 3, 3, 2, 5, 4, 5,
     6, 5, 6, 5, 4, 2, 1, 5, 6, 1, 0, 2,
@@ -34,6 +33,7 @@ struct AnimStep {
     int alpha;
     int beta;
     bool isPruned;
+    QString pruneReason = "";
 };
 
 #endif // GAMEUTILS_H
