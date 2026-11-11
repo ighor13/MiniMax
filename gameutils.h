@@ -34,6 +34,7 @@ struct AnimStep {
     int beta;
     bool isPruned;
     QString pruneReason = "";
+    bool isReasonAnchor = false; // <--- НОВОЕ ПОЛЕ
 };
 
 #endif // GAMEUTILS_H

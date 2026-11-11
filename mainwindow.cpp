@@ -15,18 +15,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
-    if (m_animTimer) {
-        m_animTimer->stop();
-    }
-
-    if (m_scene) {
-        m_scene->clear();
-    }
-
-    if (m_view) {
-        delete m_view;
-        m_view = nullptr;
-    }
+    if (m_animTimer) m_animTimer->stop();
+    if (m_scene) m_scene->clear();
+    if (m_view) { delete m_view; m_view = nullptr; }
 }
 
 void MainWindow::setupUi() {
@@ -50,7 +41,7 @@ void MainWindow::setupUi() {
     connect(m_btnStep, &QPushButton::clicked, this, &MainWindow::stepOnce);
 
     m_chkRootIsMax = new QCheckBox("Корень MAX");
-    m_chkRootIsMax->setChecked(false);
+    m_chkRootIsMax->setChecked(true);
     connect(m_chkRootIsMax, &QCheckBox::toggled, this, [this]() {
         buildTree();
         drawConnections();
@@ -217,18 +208,19 @@ void MainWindow::drawConnections() {
     m_view->fitInView(m_scene->itemsBoundingRect(), Qt::KeepAspectRatio);
 }
 
-void MainWindow::markSubtreeAsPruned(int nodeId, const QString& reason) {
+// <--- ОБНОВЛЕНА СИГНАТУРА
+void MainWindow::markSubtreeAsPruned(int nodeId, const QString& reason, bool isAnchor) {
     GameNode &node = m_nodes[nodeId];
 
     if (node.type == NodeType::LEAF && !m_chkMarkLeaves->isChecked()) {
         return;
     }
 
-    QString displayReason = m_chkShowReasons->isChecked() ? reason : "";
-    m_animationSteps.append({nodeId, 0, false, 0, 0, true, displayReason});
+    QString displayReason = (m_chkShowReasons->isChecked() && isAnchor) ? reason : "";
+    m_animationSteps.append({nodeId, 0, false, 0, 0, true, displayReason, isAnchor});
 
     for (int childId : node.children) {
-        markSubtreeAsPruned(childId, "");
+        markSubtreeAsPruned(childId, "", false); // Дети не являются якорями
     }
 }
 
@@ -322,7 +314,7 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
             maxEval = std::max(maxEval, eval);
             alpha = std::max(alpha, eval);
 
-            m_animationSteps.append({nodeId, maxEval, true, alpha, beta, false});
+            m_animationSteps.append({nodeId, maxEval, true, alpha, beta, false, "", false});
 
             qDebug() << "MAX node" << nodeId << "(" << node.level << "," << node.indexInLevel << ")"
                      << "child" << childId << "eval" << eval
@@ -331,8 +323,15 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
             if (beta <= alpha) {
                 QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
                 qDebug() << "PRUNING REASON:" << reason;
+
+                // <--- СНАЧАЛА помечаем родителя как "якорь" с причиной
+                if (m_chkShowReasons->isChecked()) {
+                    m_animationSteps.append({nodeId, 0, false, 0, 0, true, reason, true});
+                }
+
+                // <--- Потом перечеркиваем детей без причины
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k], reason);
+                    markSubtreeAsPruned(node.children[k], "", false);
                 }
                 break;
             }
@@ -346,7 +345,7 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
             minEval = std::min(minEval, eval);
             beta = std::min(beta, eval);
 
-            m_animationSteps.append({nodeId, minEval, true, alpha, beta, false});
+            m_animationSteps.append({nodeId, minEval, true, alpha, beta, false, "", false});
 
             qDebug() << "MIN node" << nodeId << "(" << node.level << "," << node.indexInLevel << ")"
                      << "child" << childId << "eval" << eval
@@ -355,8 +354,13 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
             if (beta <= alpha) {
                 QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
                 qDebug() << "PRUNING REASON:" << reason;
+
+                if (m_chkShowReasons->isChecked()) {
+                    m_animationSteps.append({nodeId, 0, false, 0, 0, true, reason, true});
+                }
+
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k], reason);
+                    markSubtreeAsPruned(node.children[k], "", false);
                 }
                 break;
             }
@@ -388,7 +392,7 @@ void MainWindow::stepAnimation() {
     NodeItem *item = m_items[step.nodeId];
 
     if (step.isPruned) {
-        item->setPruned(step.pruneReason);
+        item->setPruned(step.pruneReason, step.isReasonAnchor);
     } else if (step.isEvaluated) {
         item->setState(true, step.value);
         m_nodes[step.nodeId].value = step.value;

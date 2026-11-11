@@ -16,10 +16,8 @@ set(SOURCES
     gameutils.h
 )
 
-# Создаем цель (для Android и десктопа)
 qt_add_executable(MinimaxVisualizer ${SOURCES})
 
-# Настройки специфичные для Android
 if(ANDROID)
     set_target_properties(MinimaxVisualizer PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
@@ -28,10 +26,8 @@ endif()
 
 target_link_libraries(MinimaxVisualizer PRIVATE Qt6::Widgets)
 
-# Обязательная финализация для Qt 6
 qt_finalize_executable(MinimaxVisualizer)
 
-# --- АВТОМАТИЧЕСКИЙ ДЕПЛОЙ ДЛЯ WINDOWS ---
 if(WIN32)
     get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
     get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
@@ -39,8 +35,7 @@ if(WIN32)
 
     if(WINDEPLOYQT_EXECUTABLE)
         set(DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy")
-
-        # Определяем флаг в зависимости от конфигурации (Debug/Release)
+        
         set(DEPLOY_FLAG "--release")
         if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             set(DEPLOY_FLAG "--debug")
@@ -54,7 +49,6 @@ if(WIN32)
             COMMAND "${WINDEPLOYQT_EXECUTABLE}"
                 ${DEPLOY_FLAG}
                 --no-translations
-                --no-compiler-runtime
                 --no-system-d3d-compiler
                 --no-opengl-sw
                 "${DEPLOY_DIR}/MinimaxVisualizer.exe"
@@ -62,4 +56,3 @@ if(WIN32)
         )
     endif()
 endif()
-# ------------------------------------------

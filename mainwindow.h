@@ -29,7 +29,7 @@ private:
     void buildTree();
     void layoutTree(GameNode& node, int level, int& currentX, int widthPerLeaf);
     void drawConnections();
-    void markSubtreeAsPruned(int nodeId, const QString& reason);
+    void markSubtreeAsPruned(int nodeId, const QString& reason, bool isAnchor);
     int minimax(int nodeId, int depth, bool isMax, int alpha, int beta);
 
     QGraphicsScene *m_scene;
@@ -37,7 +37,7 @@ private:
     QTimer *m_animTimer;
     QCheckBox *m_chkRootIsMax;
     QCheckBox *m_chkMarkLeaves;
-    QCheckBox *m_chkShowReasons; // <--- НОВЫЙ ЧЕКБОКС
+    QCheckBox *m_chkShowReasons;
 
     QPushButton *m_btnStart;
     QPushButton *m_btnPause;
