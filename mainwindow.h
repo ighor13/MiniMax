@@ -29,7 +29,7 @@ private:
     void buildTree();
     void layoutTree(GameNode& node, int level, int& currentX, int widthPerLeaf);
     void drawConnections();
-    void markSubtreeAsPruned(int nodeId, const QString& reason, bool isAnchor);
+    void markSubtreeAsPruned(int nodeId, const QString& reason);
     int minimax(int nodeId, int depth, bool isMax, int alpha, int beta);
 
     QGraphicsScene *m_scene;

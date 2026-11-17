@@ -1,6 +1,5 @@
 #include "nodeitem.h"
 #include <QFont>
-#include <QDebug>
 
 NodeItem::NodeItem(int id, QGraphicsItem *parent)
     : QGraphicsItem(parent), m_id(id)
@@ -14,13 +13,10 @@ void NodeItem::setState(bool evaluated, int value) {
     update();
 }
 
-void NodeItem::setPruned(const QString& reason, bool isReasonAnchor) {
+void NodeItem::setPruned(const QString& reason) {
     m_isPruned = true;
     if (!reason.isEmpty()) {
         m_pruneReason = reason;
-    }
-    if (isReasonAnchor) {
-        m_showReason = true;
     }
     update();
 }
@@ -29,7 +25,6 @@ void NodeItem::resetItem() {
     m_isEvaluated = false;
     m_isPruned = false;
     m_pruneReason = "";
-    m_showReason = false;
     m_value = 0;
     update();
 }
@@ -69,17 +64,15 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
         painter->setPen(QPen(Qt::red, 3));
         painter->drawLine(QPointF(-m_size.width()/2, -m_size.height()/2), QPointF(m_size.width()/2, m_size.height()/2));
         painter->drawLine(QPointF(m_size.width()/2, -m_size.height()/2), QPointF(-m_size.width()/2, m_size.height()/2));
-    }
 
-    // <--- Рисуем причину только если это "якорь" (родитель, где произошло сравнение)
-    if (m_isPruned && m_showReason && !m_pruneReason.isEmpty()) {
-        QFont reasonFont = painter->font();
-        reasonFont.setPointSize(14);
-        reasonFont.setBold(true);
-        painter->setFont(reasonFont);
-        painter->setPen(Qt::blue);
-
-        QRectF textRect(-60, m_size.height()/2 + 10, 120, 30);
-        painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignTop, m_pruneReason);
+        if (!m_pruneReason.isEmpty()) {
+            QFont reasonFont = painter->font();
+            reasonFont.setPointSize(14);
+            reasonFont.setBold(true);
+            painter->setFont(reasonFont);
+            painter->setPen(Qt::blue);
+            QRectF textRect(-60, m_size.height()/2 + 10, 120, 30);
+            painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignTop, m_pruneReason);
+        }
     }
 }

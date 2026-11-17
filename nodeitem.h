@@ -10,7 +10,7 @@ public:
     NodeItem(int id, QGraphicsItem *parent = nullptr);
 
     void setState(bool evaluated, int value);
-    void setPruned(const QString& reason = "", bool isReasonAnchor = false);
+    void setPruned(const QString& reason = "");
     void resetItem();
 
     QRectF boundingRect() const override;
@@ -24,7 +24,6 @@ private:
     bool m_isPruned = false;
     int m_value = 0;
     QString m_pruneReason = "";
-    bool m_showReason = false; // <--- НОВОЕ ПОЛЕ
     QSizeF m_size = QSizeF(60, 60);
 };
 
