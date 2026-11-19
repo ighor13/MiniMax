@@ -13,24 +13,37 @@ void NodeItem::setState(bool evaluated, int value) {
     update();
 }
 
-void NodeItem::setPruned(const QString& reason) {
+void NodeItem::setPruned() {
+    if (m_isPruned) return;
     m_isPruned = true;
-    if (!reason.isEmpty()) {
-        m_pruneReason = reason;
-    }
+    update();
+}
+
+void NodeItem::setMark(Mark mark) {
+    if (m_mark == mark) return;
+    m_mark = mark;
     update();
 }
 
 void NodeItem::resetItem() {
     m_isEvaluated = false;
     m_isPruned = false;
-    m_pruneReason = "";
+    m_mark = Mark::NoMark;
     m_value = 0;
     update();
 }
 
+QPointF NodeItem::topAnchor() const {
+    // mapToScene, а не просто pos(): если у узла когда-нибудь появится
+    // родитель или смещение, якорь останется на верхней грани.
+    return mapToScene(QPointF(0.0, -m_size.height() / 2.0));
+}
+
 QRectF NodeItem::boundingRect() const {
-    return QRectF(-m_size.width()/2, -m_size.height()/2, m_size.width(), m_size.height() + 40);
+    // Рамка метки рисуется с отступом 6 px, поэтому bbox чуть больше узла.
+    const qreal w = m_size.width();
+    const qreal h = m_size.height();
+    return QRectF(-w / 2 - 8, -h / 2 - 8, w + 16, h + 16);
 }
 
 void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) {
@@ -39,10 +52,13 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
 
     painter->setRenderHint(QPainter::Antialiasing);
 
+    const QRectF box(-m_size.width() / 2, -m_size.height() / 2,
+                     m_size.width(), m_size.height());
+
     if (m_isEvaluated) {
         painter->setBrush(QBrush(QColor(230, 240, 200)));
         painter->setPen(QPen(Qt::black, 2));
-        painter->drawRect(QRectF(-m_size.width()/2, -m_size.height()/2, m_size.width(), m_size.height()));
+        painter->drawRect(box);
 
         painter->setPen(Qt::black);
         QFont font = painter->font();
@@ -53,26 +69,31 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
         font.setPointSize(20);
 #endif
         painter->setFont(font);
-        painter->drawText(QRectF(-m_size.width()/2, -m_size.height()/2, m_size.width(), m_size.height()), Qt::AlignCenter, QString::number(m_value));
+        painter->drawText(box, Qt::AlignCenter, QString::number(m_value));
     } else {
         painter->setBrush(QBrush(QColor(245, 245, 220)));
         painter->setPen(QPen(Qt::darkGreen, 2));
-        painter->drawEllipse(QRectF(-m_size.width()/2, -m_size.height()/2, m_size.width(), m_size.height()));
+        painter->drawEllipse(box);
     }
 
     if (m_isPruned) {
         painter->setPen(QPen(Qt::red, 3));
-        painter->drawLine(QPointF(-m_size.width()/2, -m_size.height()/2), QPointF(m_size.width()/2, m_size.height()/2));
-        painter->drawLine(QPointF(m_size.width()/2, -m_size.height()/2), QPointF(-m_size.width()/2, m_size.height()/2));
+        painter->drawLine(QPointF(-m_size.width() / 2, -m_size.height() / 2),
+                          QPointF(m_size.width() / 2, m_size.height() / 2));
+        painter->drawLine(QPointF(m_size.width() / 2, -m_size.height() / 2),
+                          QPointF(-m_size.width() / 2, m_size.height() / 2));
+    }
 
-        if (!m_pruneReason.isEmpty()) {
-            QFont reasonFont = painter->font();
-            reasonFont.setPointSize(14);
-            reasonFont.setBold(true);
-            painter->setFont(reasonFont);
-            painter->setPen(Qt::blue);
-            QRectF textRect(-60, m_size.height()/2 + 10, 120, 30);
-            painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignTop, m_pruneReason);
+    if (m_mark != Mark::NoMark) {
+        QColor color;
+        switch (m_mark) {
+        case Mark::AlphaOwner: color = QColor(25, 90, 210);  break; // владелец alpha
+        case Mark::BetaOwner:  color = QColor(200, 40, 40);  break; // владелец beta
+        case Mark::Decision:   color = QColor(235, 140, 0);  break; // узел-решение
+        case Mark::NoMark:     return;
         }
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(color, 3));
+        painter->drawRect(box.adjusted(-6, -6, 6, 6));
     }
 }

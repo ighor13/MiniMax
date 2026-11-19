@@ -1,13 +1,95 @@
 #include "mainwindow.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGraphicsItem>
+#include <QGraphicsSimpleTextItem>
+#include <QGraphicsLineItem>
+#include <QFontMetricsF>
+#include <QStringList>
 #include <QDebug>
 #include <algorithm>
+
+// Линия «alpha <-> beta» с подписью сравнения в середине.
+// Определение на глобальном уровне: иначе это будет другой тип,
+// чем форвард-объявление в mainwindow.h (ошибка C2872).
+class CutoffLinkItem : public QGraphicsItem
+{
+public:
+    CutoffLinkItem(const QPointF &from, const QPointF &to, const QString &label)
+        : m_from(from), m_to(to), m_label(label)
+    {
+        setZValue(-0.5);   // выше рёбер дерева (-1), ниже узлов (0)
+        setAcceptedMouseButtons(Qt::NoButton);
+    }
+
+    ~CutoffLinkItem() override = default;
+
+    QRectF boundingRect() const override
+    {
+        const QRectF r = QRectF(m_from, m_to).normalized();
+        return r.adjusted(-200.0, -80.0, 200.0, 80.0);
+    }
+
+    void setEmphasized(bool on)
+    {
+        if (m_emphasized == on) return;
+        m_emphasized = on;
+        update();
+    }
+
+    void setLabelVisible(bool on)
+    {
+        if (m_labelVisible == on) return;
+        m_labelVisible = on;
+        update();
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setRenderHint(QPainter::Antialiasing);
+
+        // Голубой в обоих состояниях, меняется только насыщенность,
+        // чтобы линии не сливались с серыми рёбрами дерева.
+        const QColor lineColor = m_emphasized ? QColor(20, 110, 220) : QColor(120, 175, 235);
+        painter->setPen(QPen(lineColor, m_emphasized ? 2.5 : 1.6, Qt::DashLine, Qt::RoundCap));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(m_from, m_to);
+
+        if (!m_labelVisible)
+            return;
+
+        QFont font = painter->font();
+        font.setBold(m_emphasized);
+        font.setPointSizeF(m_emphasized ? 14.0 : 12.0);
+        painter->setFont(font);
+
+        const QFontMetricsF fm(font);
+        const QSizeF textSize = fm.size(Qt::TextSingleLine, m_label);
+
+        const QPointF mid = (m_from + m_to) / 2.0;
+        QRectF plate(QPointF(0, 0), textSize + QSizeF(16.0, 10.0));
+        plate.moveCenter(QPointF(mid.x(), mid.y() - 22.0));
+
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 255, 255, m_emphasized ? 235 : 190));
+        painter->drawRoundedRect(plate, 4.0, 4.0);
+
+        painter->setPen(m_emphasized ? QColor(15, 85, 190) : QColor(95, 150, 215));
+        painter->drawText(plate, Qt::AlignCenter, m_label);
+    }
+
+private:
+    QPointF m_from;
+    QPointF m_to;
+    QString m_label;
+    bool m_emphasized = true;
+    bool m_labelVisible = true;
+};
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setupUi();
     buildTree();
-    drawConnections();
 
     QTimer::singleShot(0, this, [this]() {
         m_view->fitInView(m_scene->itemsBoundingRect(), Qt::KeepAspectRatio);
@@ -15,9 +97,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
-    if (m_animTimer) m_animTimer->stop();
-    if (m_scene) m_scene->clear();
-    if (m_view) { delete m_view; m_view = nullptr; }
+    // Ничего не удаляем вручную: m_scene, m_animTimer и central созданы
+    // с родителем this, а m_view живёт внутри layout центрального виджета.
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+
+    // Отцепляем вид от сцены до её разрушения, чтобы QGraphicsView
+    // не обращался к уже удалённым элементам.
+    if (m_view) {
+        m_view->setScene(nullptr);
+    }
 }
 
 void MainWindow::setupUi() {
@@ -44,7 +134,6 @@ void MainWindow::setupUi() {
     m_chkRootIsMax->setChecked(false);
     connect(m_chkRootIsMax, &QCheckBox::toggled, this, [this]() {
         buildTree();
-        drawConnections();
     });
 
     m_chkMarkLeaves = new QCheckBox("Метить листья");
@@ -52,6 +141,7 @@ void MainWindow::setupUi() {
 
     m_chkShowReasons = new QCheckBox("Условия отсечения");
     m_chkShowReasons->setChecked(true);
+    connect(m_chkShowReasons, &QCheckBox::toggled, this, &MainWindow::updateCutoffLabels);
 
     QHBoxLayout *topLayout = new QHBoxLayout();
     topLayout->addWidget(m_btnStart);
@@ -77,8 +167,16 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::buildTree() {
+    // Таймер продолжал тикать с уже очищенной очередью шагов и на следующем
+    // тике красил все неоценённые узлы крестами.
+    m_animTimer->stop();
+
+    // Сначала убираем линии, пока m_items ещё валиден, потом чистим сцену.
+    clearCutoffVisuals();
+
     m_animationSteps.clear();
     m_currentStep = 0;
+    m_realCutoffs = 0;
     m_nodes.clear();
     m_items.clear();
     m_scene->clear();
@@ -136,7 +234,7 @@ void MainWindow::buildTree() {
         }
     }
 
-    for(const auto& node : m_nodes) {
+    for (const auto& node : m_nodes) {
         NodeItem *item = new NodeItem(node.id);
         item->setState(node.isEvaluated, node.value);
         m_scene->addItem(item);
@@ -171,7 +269,8 @@ void MainWindow::buildTree() {
         m_scene->addItem(label);
     }
 
-    m_scene->setSceneRect(m_scene->itemsBoundingRect());
+    // Рёбра рисуем здесь же, чтобы не вызывать drawConnections() дважды.
+    drawConnections();
 }
 
 void MainWindow::layoutTree(GameNode& node, int level, int& currentX, int widthPerLeaf) {
@@ -189,7 +288,7 @@ void MainWindow::layoutTree(GameNode& node, int level, int& currentX, int widthP
         node.pos.setX((startX + endX) / 2.0);
     }
 
-    if(node.id < m_items.size()) {
+    if (node.id < m_items.size()) {
         m_items[node.id]->setPos(node.pos);
     }
 }
@@ -208,43 +307,86 @@ void MainWindow::drawConnections() {
     m_view->fitInView(m_scene->itemsBoundingRect(), Qt::KeepAspectRatio);
 }
 
-void MainWindow::markSubtreeAsPruned(int nodeId, const QString& reason) {
+void MainWindow::resetAllNodes() {
+    for (int i = 0; i < m_nodes.size(); ++i) {
+        m_items[i]->resetItem();
+        if (m_nodes[i].type == NodeType::LEAF) {
+            m_items[i]->setState(true, m_nodes[i].value);
+        } else {
+            // Значения внутренних узлов от прошлого прогона больше не нужны.
+            m_nodes[i].isEvaluated = false;
+            m_nodes[i].value = 0;
+        }
+    }
+}
+
+void MainWindow::prepareSteps() {
+    m_animationSteps.clear();
+    m_currentStep = 0;
+    m_evaluatedLeaves = 0;
+    m_realCutoffs = 0;
+
+    clearCutoffVisuals();
+    resetAllNodes();
+
+    Window window;
+    minimax(m_rootIndex, m_chkRootIsMax->isChecked(), window);
+
+    qDebug() << "=== Evaluated leaves:" << m_evaluatedLeaves << "of" << LEAF_VALUES.size()
+             << " | real cutoffs:" << m_realCutoffs;
+}
+
+int MainWindow::markSubtreeAsPruned(int nodeId) {
     GameNode &node = m_nodes[nodeId];
 
+    // Лист, который не метим, не считается отсечённым — иначе событие
+    // отсечения появится там, где на экране ничего не перечёркнуто.
     if (node.type == NodeType::LEAF && !m_chkMarkLeaves->isChecked()) {
-        return;
+        return 0;
     }
 
-    QString displayReason = m_chkShowReasons->isChecked() ? reason : "";
-    m_animationSteps.append({nodeId, 0, false, 0, 0, true, displayReason});
+    AnimStep step;
+    step.nodeId = nodeId;
+    step.isPruned = true;
+    m_animationSteps.append(step);
 
+    int count = 1;
     for (int childId : node.children) {
-        markSubtreeAsPruned(childId, "");
+        count += markSubtreeAsPruned(childId);
     }
+    return count;
+}
+
+void MainWindow::appendEvalStep(int nodeId, int value, const Window& window) {
+    AnimStep step;
+    step.nodeId = nodeId;
+    step.value = value;
+    step.isEvaluated = true;
+    step.alpha = window.alpha;
+    step.beta = window.beta;
+    m_animationSteps.append(step);
+}
+
+AnimStep MainWindow::makeCutoffStep(int decisionNode, const Window& window) const {
+    AnimStep step;
+    step.isCutoff = true;
+    step.nodeId = decisionNode;
+    step.decisionNode = decisionNode;
+    step.alpha = window.alpha;
+    step.beta = window.beta;
+    step.alphaFrom = window.alphaFrom;
+    step.betaFrom = window.betaFrom;
+    return step;
 }
 
 void MainWindow::startAlgorithm() {
     if (m_animTimer->isActive()) return;
 
     if (m_animationSteps.isEmpty() || m_currentStep >= m_animationSteps.size()) {
-        m_animationSteps.clear();
-        m_currentStep = 0;
-        m_evaluatedLeaves = 0;
-
-        for(int i = 0; i < m_nodes.size(); ++i) {
-            m_items[i]->resetItem();
-            if (m_nodes[i].type == NodeType::LEAF) {
-                m_items[i]->setState(true, m_nodes[i].value);
-            }
-        }
-
-        bool rootIsMax = m_chkRootIsMax->isChecked();
-        minimax(m_rootIndex, 0, rootIsMax, -1000, 1000);
-
-        qDebug() << "=== Evaluated leaves:" << m_evaluatedLeaves << "of" << 36;
+        prepareSteps();
     }
 
-    if(!m_animationSteps.isEmpty()) {
+    if (!m_animationSteps.isEmpty()) {
         m_animTimer->start(30);
     }
 }
@@ -260,12 +402,8 @@ void MainWindow::stopAnimation() {
     m_animationSteps.clear();
     m_currentStep = 0;
 
-    for(int i = 0; i < m_nodes.size(); ++i) {
-        m_items[i]->resetItem();
-        if (m_nodes[i].type == NodeType::LEAF) {
-            m_items[i]->setState(true, m_nodes[i].value);
-        }
-    }
+    clearCutoffVisuals();
+    resetAllNodes();
     m_scene->update();
 }
 
@@ -275,21 +413,7 @@ void MainWindow::stepOnce() {
     }
 
     if (m_animationSteps.isEmpty() || m_currentStep >= m_animationSteps.size()) {
-        m_animationSteps.clear();
-        m_currentStep = 0;
-        m_evaluatedLeaves = 0;
-
-        for(int i = 0; i < m_nodes.size(); ++i) {
-            m_items[i]->resetItem();
-            if (m_nodes[i].type == NodeType::LEAF) {
-                m_items[i]->setState(true, m_nodes[i].value);
-            }
-        }
-
-        bool rootIsMax = m_chkRootIsMax->isChecked();
-        minimax(m_rootIndex, 0, rootIsMax, -1000, 1000);
-
-        qDebug() << "=== Evaluated leaves:" << m_evaluatedLeaves << "of" << 36;
+        prepareSteps();
     }
 
     if (m_currentStep < m_animationSteps.size()) {
@@ -297,7 +421,7 @@ void MainWindow::stepOnce() {
     }
 }
 
-int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) {
+int MainWindow::minimax(int nodeId, bool isMax, Window window) {
     GameNode &node = m_nodes[nodeId];
 
     if (node.type == NodeType::LEAF) {
@@ -306,53 +430,135 @@ int MainWindow::minimax(int nodeId, int depth, bool isMax, int alpha, int beta) 
     }
 
     if (isMax) {
-        int maxEval = -1000;
+        int best = ALPHA_START;
         for (int i = 0; i < node.children.size(); ++i) {
-            int childId = node.children[i];
-            int eval = minimax(childId, depth + 1, false, alpha, beta);
-            maxEval = std::max(maxEval, eval);
-            alpha = std::max(alpha, eval);
+            const int childId = node.children[i];
+            const int eval = minimax(childId, false, window);
 
-            m_animationSteps.append({nodeId, maxEval, true, alpha, beta, false});
+            best = std::max(best, eval);
+            if (eval > window.alpha) {
+                window.alpha = eval;
+                window.alphaFrom = childId;   // alpha подняла именно эта ветвь
+            }
 
-            qDebug() << "MAX node" << nodeId << "(" << node.level << "," << node.indexInLevel << ")"
-                     << "child" << childId << "eval" << eval
-                     << "alpha" << alpha << "beta" << beta << "prune?" << (beta <= alpha);
+            appendEvalStep(nodeId, best, window);
 
-            if (beta <= alpha) {
-                QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
-                qDebug() << "PRUNING REASON:" << reason;
+            if (window.beta <= window.alpha) {
+                // Сначала помечаем, потом решаем, было ли отсечение на самом деле.
+                const int cutoffIndex = m_animationSteps.size();
+                int marked = 0;
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k], reason);
+                    marked += markSubtreeAsPruned(node.children[k]);
+                }
+                if (marked > 0) {
+                    m_animationSteps.insert(cutoffIndex, makeCutoffStep(nodeId, window));
+                    m_realCutoffs++;
                 }
                 break;
             }
         }
-        return maxEval;
+        return best;
     } else {
-        int minEval = 1000;
+        int best = BETA_START;
         for (int i = 0; i < node.children.size(); ++i) {
-            int childId = node.children[i];
-            int eval = minimax(childId, depth + 1, true, alpha, beta);
-            minEval = std::min(minEval, eval);
-            beta = std::min(beta, eval);
+            const int childId = node.children[i];
+            const int eval = minimax(childId, true, window);
 
-            m_animationSteps.append({nodeId, minEval, true, alpha, beta, false});
+            best = std::min(best, eval);
+            if (eval < window.beta) {
+                window.beta = eval;
+                window.betaFrom = childId;    // beta опустила именно эта ветвь
+            }
 
-            qDebug() << "MIN node" << nodeId << "(" << node.level << "," << node.indexInLevel << ")"
-                     << "child" << childId << "eval" << eval
-                     << "alpha" << alpha << "beta" << beta << "prune?" << (beta <= alpha);
+            appendEvalStep(nodeId, best, window);
 
-            if (beta <= alpha) {
-                QString reason = QString("%1 <= %2").arg(beta).arg(alpha);
-                qDebug() << "PRUNING REASON:" << reason;
+            if (window.beta <= window.alpha) {
+                const int cutoffIndex = m_animationSteps.size();
+                int marked = 0;
                 for (int k = i + 1; k < node.children.size(); ++k) {
-                    markSubtreeAsPruned(node.children[k], reason);
+                    marked += markSubtreeAsPruned(node.children[k]);
+                }
+                if (marked > 0) {
+                    m_animationSteps.insert(cutoffIndex, makeCutoffStep(nodeId, window));
+                    m_realCutoffs++;
                 }
                 break;
             }
         }
-        return minEval;
+        return best;
+    }
+}
+
+void MainWindow::applyCutoffVisual(const AnimStep& step) {
+    // Все предыдущие отсечения приглушаются, текущее будет ярким.
+    for (CutoffLinkItem *link : m_cutoffItems) {
+        link->setEmphasized(false);
+    }
+
+    // Снимаем метки с узлов предыдущего отсечения.
+    for (int id : m_markedNodes) {
+        if (id >= 0 && id < m_items.size()) {
+            m_items[id]->setMark(NodeItem::Mark::NoMark);
+        }
+    }
+    m_markedNodes.clear();
+
+    if (step.decisionNode >= 0 && step.decisionNode < m_items.size()) {
+        m_items[step.decisionNode]->setMark(NodeItem::Mark::Decision);
+        m_markedNodes.append(step.decisionNode);
+    }
+    if (step.alphaFrom >= 0 && step.alphaFrom < m_items.size()) {
+        m_items[step.alphaFrom]->setMark(NodeItem::Mark::AlphaOwner);
+        m_markedNodes.append(step.alphaFrom);
+    }
+    if (step.betaFrom >= 0 && step.betaFrom < m_items.size()) {
+        m_items[step.betaFrom]->setMark(NodeItem::Mark::BetaOwner);
+        m_markedNodes.append(step.betaFrom);
+    }
+
+    // Линия нужна только когда известны оба участника.
+    if (step.alphaFrom < 0 || step.betaFrom < 0 || step.alphaFrom == step.betaFrom) {
+        qDebug() << "cutoff: нет полной пары alpha/beta" << step.alphaFrom << step.betaFrom;
+        m_scene->update();
+        return;
+    }
+
+    const QString label = QString("β=%1 ≤ α=%2  →  отрезано")
+                              .arg(step.beta)
+                              .arg(step.alpha);
+
+    // Концы линии — центры верхних граней узлов, а не центры квадратов:
+    // иначе линия уходит под узел и непонятно, к чему она относится.
+    CutoffLinkItem *link = new CutoffLinkItem(m_items[step.alphaFrom]->topAnchor(),
+                                              m_items[step.betaFrom]->topAnchor(),
+                                              label);
+    link->setLabelVisible(m_chkShowReasons->isChecked());
+    m_scene->addItem(link);
+    m_cutoffItems.append(link);
+
+    m_scene->update();
+}
+
+void MainWindow::clearCutoffVisuals() {
+    for (CutoffLinkItem *link : m_cutoffItems) {
+        if (!link) continue;
+        m_scene->removeItem(link);
+        delete link;
+    }
+    m_cutoffItems.clear();
+
+    for (int id : m_markedNodes) {
+        if (id >= 0 && id < m_items.size()) {
+            m_items[id]->setMark(NodeItem::Mark::NoMark);
+        }
+    }
+    m_markedNodes.clear();
+}
+
+void MainWindow::updateCutoffLabels() {
+    const bool visible = m_chkShowReasons->isChecked();
+    for (CutoffLinkItem *link : m_cutoffItems) {
+        link->setLabelVisible(visible);
     }
 }
 
@@ -369,21 +575,24 @@ void MainWindow::stepAnimation() {
         return;
     }
 
-    AnimStep step = m_animationSteps[m_currentStep];
+    const AnimStep step = m_animationSteps[m_currentStep];
 
-    if (step.nodeId < 0 || step.nodeId >= m_items.size()) {
+    if (step.isCutoff) {
+        applyCutoffVisual(step);
         m_currentStep++;
         return;
     }
 
-    NodeItem *item = m_items[step.nodeId];
+    if (step.nodeId >= 0 && step.nodeId < m_items.size()) {
+        NodeItem *item = m_items[step.nodeId];
 
-    if (step.isPruned) {
-        item->setPruned(step.pruneReason);
-    } else if (step.isEvaluated) {
-        item->setState(true, step.value);
-        m_nodes[step.nodeId].value = step.value;
-        m_nodes[step.nodeId].isEvaluated = true;
+        if (step.isPruned) {
+            item->setPruned();
+        } else if (step.isEvaluated) {
+            item->setState(true, step.value);
+            m_nodes[step.nodeId].value = step.value;
+            m_nodes[step.nodeId].isEvaluated = true;
+        }
     }
 
     m_currentStep++;
