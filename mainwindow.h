@@ -52,7 +52,6 @@ private:
     QGraphicsView *m_view = nullptr;
     QTimer *m_animTimer = nullptr;
     QCheckBox *m_chkRootIsMax = nullptr;
-    QCheckBox *m_chkMarkLeaves = nullptr;
     QCheckBox *m_chkShowReasons = nullptr;
 
     QPushButton *m_btnStart = nullptr;

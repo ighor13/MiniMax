@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QDebug>
 #include <algorithm>
+#include <utility>   // std::as_const
 
 // Линия «alpha <-> beta» с подписью сравнения в середине.
 // Определение на глобальном уровне: иначе это будет другой тип,
@@ -136,9 +137,6 @@ void MainWindow::setupUi() {
         buildTree();
     });
 
-    m_chkMarkLeaves = new QCheckBox("Метить листья");
-    m_chkMarkLeaves->setChecked(false);
-
     m_chkShowReasons = new QCheckBox("Условия отсечения");
     m_chkShowReasons->setChecked(true);
     connect(m_chkShowReasons, &QCheckBox::toggled, this, &MainWindow::updateCutoffLabels);
@@ -149,7 +147,6 @@ void MainWindow::setupUi() {
     topLayout->addWidget(m_btnStop);
     topLayout->addWidget(m_btnStep);
     topLayout->addWidget(m_chkRootIsMax);
-    topLayout->addWidget(m_chkMarkLeaves);
     topLayout->addWidget(m_chkShowReasons);
     topLayout->addStretch();
 
@@ -234,7 +231,7 @@ void MainWindow::buildTree() {
         }
     }
 
-    for (const auto& node : m_nodes) {
+    for (const auto& node : std::as_const(m_nodes)) {
         NodeItem *item = new NodeItem(node.id);
         item->setState(node.isEvaluated, node.value);
         m_scene->addItem(item);
@@ -281,7 +278,7 @@ void MainWindow::layoutTree(GameNode& node, int level, int& currentX, int widthP
         currentX += widthPerLeaf;
     } else {
         int startX = currentX;
-        for (int childIdx : node.children) {
+        for (int childIdx : std::as_const(node.children)) {
             layoutTree(m_nodes[childIdx], level + 1, currentX, widthPerLeaf);
         }
         int endX = currentX - widthPerLeaf;
@@ -295,7 +292,7 @@ void MainWindow::layoutTree(GameNode& node, int level, int& currentX, int widthP
 
 void MainWindow::drawConnections() {
     QPen linePen(Qt::darkGray, 1.5);
-    for (const auto& node : m_nodes) {
+    for (const auto& node : std::as_const(m_nodes)) {
         if (node.parent != -1) {
             QPointF p1 = m_nodes[node.parent].pos;
             QPointF p2 = node.pos;
@@ -339,19 +336,15 @@ void MainWindow::prepareSteps() {
 int MainWindow::markSubtreeAsPruned(int nodeId) {
     GameNode &node = m_nodes[nodeId];
 
-    // Лист, который не метим, не считается отсечённым — иначе событие
-    // отсечения появится там, где на экране ничего не перечёркнуто.
-    if (node.type == NodeType::LEAF && !m_chkMarkLeaves->isChecked()) {
-        return 0;
-    }
-
+    // Листья теперь метятся всегда: чекбокс «Метить листья» убран,
+    // отсечение должно быть видно на всех уровнях, включая нижний.
     AnimStep step;
     step.nodeId = nodeId;
     step.isPruned = true;
     m_animationSteps.append(step);
 
     int count = 1;
-    for (int childId : node.children) {
+    for (int childId : std::as_const(node.children)) {
         count += markSubtreeAsPruned(childId);
     }
     return count;
@@ -491,12 +484,12 @@ int MainWindow::minimax(int nodeId, bool isMax, Window window) {
 
 void MainWindow::applyCutoffVisual(const AnimStep& step) {
     // Все предыдущие отсечения приглушаются, текущее будет ярким.
-    for (CutoffLinkItem *link : m_cutoffItems) {
+    for (CutoffLinkItem *link : std::as_const(m_cutoffItems)) {
         link->setEmphasized(false);
     }
 
     // Снимаем метки с узлов предыдущего отсечения.
-    for (int id : m_markedNodes) {
+    for (int id : std::as_const(m_markedNodes)) {
         if (id >= 0 && id < m_items.size()) {
             m_items[id]->setMark(NodeItem::Mark::NoMark);
         }
@@ -540,14 +533,14 @@ void MainWindow::applyCutoffVisual(const AnimStep& step) {
 }
 
 void MainWindow::clearCutoffVisuals() {
-    for (CutoffLinkItem *link : m_cutoffItems) {
+    for (CutoffLinkItem *link : std::as_const(m_cutoffItems)) {
         if (!link) continue;
         m_scene->removeItem(link);
         delete link;
     }
     m_cutoffItems.clear();
 
-    for (int id : m_markedNodes) {
+    for (int id : std::as_const(m_markedNodes)) {
         if (id >= 0 && id < m_items.size()) {
             m_items[id]->setMark(NodeItem::Mark::NoMark);
         }
@@ -557,7 +550,7 @@ void MainWindow::clearCutoffVisuals() {
 
 void MainWindow::updateCutoffLabels() {
     const bool visible = m_chkShowReasons->isChecked();
-    for (CutoffLinkItem *link : m_cutoffItems) {
+    for (CutoffLinkItem *link : std::as_const(m_cutoffItems)) {
         link->setLabelVisible(visible);
     }
 }
